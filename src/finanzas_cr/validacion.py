@@ -119,6 +119,37 @@ def validar_programas(tablas: list[TablaEjecucion], contexto: dict) -> list[dict
     return salida
 
 
+def validar_documentos(ejecucion: list[dict], liquidacion: list[dict], contexto: dict) -> list[dict]:
+    """El informe de ejecución de diciembre y la liquidación del mismo año deberían coincidir.
+
+    Se compara cada cuenta (programa + código) en presupuesto inicial, presupuesto total y
+    gastado. También se reporta una cuenta que aparece en un documento y no en el otro.
+    """
+    campos = ("presupuesto_inicial", "presupuesto_total", "total_gastado")
+    ej = {(f["programa"], f["codigo"]): f for f in ejecucion}
+    liq = {(f["programa"], f["codigo"]): f for f in liquidacion}
+    salida = []
+    for clave in sorted(ej.keys() | liq.keys()):
+        programa, codigo = clave
+        a, b = ej.get(clave), liq.get(clave)
+        base = {**contexto, "programa": programa, "codigo": codigo,
+                "nivel": (a or b)["nivel"], "nombre": (a or b)["nombre"], "regla": "liquidacion_vs_ejecucion"}
+        if a is None or b is None:
+            monto = (a or b)["presupuesto_total"]
+            if abs(monto) > tolerancia(monto):
+                donde = "la liquidación" if a is None else "el informe de diciembre"
+                salida.append({**base, "campo": "cuenta", "esperado": math.nan, "encontrado": monto,
+                               "diferencia": monto, "detalle": f"La cuenta solo aparece en {donde}"})
+            continue
+        for campo in campos:
+            d = _dif(a[campo], b[campo])
+            if d is not None:
+                salida.append({**base, "campo": campo, "esperado": a[campo], "encontrado": b[campo],
+                               "diferencia": d,
+                               "detalle": "Informe de diciembre (esperado) vs. liquidación (encontrado)"})
+    return salida
+
+
 def validar_metadatos(contexto: dict, corte, nombre_archivo: str, titulo_item: str) -> list[dict]:
     """Coherencia entre el año del documento, el título del ítem y el nombre del archivo."""
     import re

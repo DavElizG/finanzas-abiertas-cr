@@ -49,6 +49,7 @@ REGLAS = {
     "metadatos": "Fecha, unidad o nombre inconsistentes",
     "duplicado": "Documento duplicado",
     "lectura": "No se pudo leer el archivo",
+    "liquidacion_vs_ejecucion": "La liquidación no coincide con el informe de diciembre",
 }
 
 GLOSARIO = [
@@ -91,6 +92,8 @@ def cargar(carpeta: Path | None = None) -> Datos:
     carpeta = carpeta or config.PROCESSED / "una"
     ej = _leer(carpeta / "ejecucion.csv")
     if not ej.empty:
+        if "documento" not in ej:  # CSV generados antes de incluir la liquidación
+            ej["documento"] = "informe de ejecución"
         ej["nombre_corto"] = [nombre_cuenta(c, n) for c, n in zip(ej["codigo"], ej["nombre"])]
     return Datos(
         ejecucion=ej,
@@ -152,10 +155,15 @@ def fecha_larga(corte: str) -> str:
 
 def informe_por_anio(ej: pd.DataFrame) -> pd.DataFrame:
     """Un informe por año: el de cierre (diciembre) o, si no hay, el último disponible."""
-    cortes = ej[["anio", "corte", "bitstream_id", "fuente_url"]].drop_duplicates("corte").sort_values("corte")
+    columnas = ["anio", "corte", "bitstream_id", "fuente_url"] + (["documento"] if "documento" in ej else [])
+    cortes = ej[columnas].drop_duplicates("corte").sort_values("corte")
     elegido = cortes.groupby("anio").tail(1).copy()
     elegido["es_cierre"] = pd.to_datetime(elegido["corte"]).dt.month == 12
     return elegido.sort_values("anio", ascending=False).reset_index(drop=True)
+
+
+def nombre_documento(documento: str | None) -> str:
+    return "Liquidación presupuestaria" if documento == "liquidación" else "Informe de ejecución"
 
 
 def es_cierre(corte: str) -> bool:
@@ -335,9 +343,13 @@ def narrativa(d: Datos, corte: str, programa: str) -> list[str]:
              "administrativo": "el programa administrativo",
              "vida_universitaria": "el programa de vida universitaria"}[programa]
     frases = []
+    documento = filas["documento"].iloc[0] if "documento" in filas and not filas.empty else ""
     if es_cierre(corte):
         frases.append(f"En {corte[:4]}, {quien} tuvo un presupuesto de {dinero(pres)} y ejecutó "
                       f"{dinero(gas)}, es decir, {porcentaje(gas / pres, 0)} de lo disponible.")
+        if documento == "liquidación":
+            frases.append(f"Para {corte[:4]} no hay informe de ejecución de diciembre en Excel; las cifras salen "
+                          "de la liquidación presupuestaria, el cierre oficial del año.")
     else:
         frases.append(f"Al {fecha_larga(corte)}, {quien} tenía un presupuesto de {dinero(pres)} para el año y "
                       f"había ejecutado {dinero(gas)} ({porcentaje(gas / pres, 0)}). El año todavía no había cerrado.")

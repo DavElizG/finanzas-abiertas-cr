@@ -409,7 +409,14 @@ def leer_libro(ruta: Path) -> list[TablaEjecucion]:
             t = parsear_filas(filas, nombre, unidad_defecto=defecto)
         if t is None or not t.filas:
             continue
+        # Varias hojas por programa (p. ej. en la liquidación: «conformación» con el gasto en 0 y
+        # «ejecución» con el gasto): manda la que trae gasto y, a igualdad, la que tiene más cuentas.
         previa = tablas.get(t.programa)
-        if previa is None or len(t.filas) > len(previa.filas):
+        if previa is None or prioridad(t) > prioridad(previa):
             tablas[t.programa] = t
     return [tablas[p] for p in PROGRAMAS if p in tablas]
+
+
+def prioridad(t: TablaEjecucion) -> tuple[bool, int]:
+    tiene_gasto = any(abs(f["total_gastado"]) > 0 for f in t.filas if f["total_gastado"] == f["total_gastado"])
+    return tiene_gasto, len(t.filas)

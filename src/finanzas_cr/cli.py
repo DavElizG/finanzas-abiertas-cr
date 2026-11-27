@@ -22,7 +22,7 @@ def main(argv: list[str] | None = None) -> int:
     sub = p.add_subparsers(dest="comando", required=True)
     _args_serie(sub.add_parser("listar", help="lista los archivos disponibles de una serie"))
     _args_serie(sub.add_parser("descargar", help="descarga una serie y actualiza el manifiesto"))
-    pr = sub.add_parser("procesar", help="procesa los Excel de ejecución descargados")
+    pr = sub.add_parser("procesar", help="procesa los Excel de ejecución y liquidación descargados")
     pr.add_argument("--sin-anomalias", action="store_true")
     d = sub.add_parser("dashboard", help="levanta el dashboard local")
     d.add_argument("--puerto", type=int, default=8050)
@@ -42,9 +42,9 @@ def main(argv: list[str] | None = None) -> int:
         rutas = descargar(a.serie, a.formatos, a.desde, a.hasta)
         print(f"\n{len(rutas)} archivos en {config.RAW / 'una' / a.serie}")
     elif a.comando == "procesar":
-        from .pipeline import procesar_ejecucion
+        from .pipeline import procesar
 
-        procesar_ejecucion(con_anomalias=not a.sin_anomalias)
+        procesar(con_anomalias=not a.sin_anomalias)
     elif a.comando == "dashboard":
         from .dashboard.app import crear_app
 
