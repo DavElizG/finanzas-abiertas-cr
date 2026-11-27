@@ -1,162 +1,282 @@
 """Dashboard (Plotly Dash) sobre los CSV de data/processed/una/.
 
     finanzas dashboard            # http://127.0.0.1:8050
+
+Organización:
+
+* **Resumen**: qué pasó en el año, en frases y en cuatro gráficos.
+* **Explorar el gasto**: mapa de bloques por el que se baja de partida a grupo y a
+  subpartida; al lado, la ficha de la cuenta elegida (historia, pagos por mes,
+  modificaciones, señales y fila exacta del documento).
+* **Cambios al presupuesto**: modificaciones internas y extraordinarios.
+* **Señales para revisar** y **Calidad de los datos**.
+
+Todo clic en una cuenta (en cualquier pestaña) abre su ficha en «Explorar».
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
-import pandas as pd
-import plotly.graph_objects as go
-from dash import Dash, Input, Output, clientside_callback, dash_table, dcc, html
+from dash import ALL, Dash, Input, Output, State, clientside_callback, ctx, dash_table, dcc, html, no_update
 
 from . import datos as D
+from . import figuras as F
 
 ASSETS = Path(__file__).parent / "assets"
-MESES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Set", "Oct", "Nov", "Dic"]
-
-# Paleta validada (dataviz, paleta de referencia). Cada entidad conserva su color en todo el tablero.
-TEMAS = {
-    "claro": {
-        "superficie": "#fcfcfb", "tinta": "#0b0b0b", "tinta2": "#52514e", "tenue": "#898781",
-        "rejilla": "#e1e0d9", "base": "#c3c2b7",
-        "presupuesto": "#2a78d6", "gastado": "#eb6834",
-        "sube": "#2a78d6", "baja": "#e34948",
-    },
-    "oscuro": {
-        "superficie": "#1a1a19", "tinta": "#f0efec", "tinta2": "#c3c2b7", "tenue": "#898781",
-        "rejilla": "#2c2c2a", "base": "#383835",
-        "presupuesto": "#3987e5", "gastado": "#d95926",
-        "sube": "#3987e5", "baja": "#e66767",
-    },
-}
+GRAFICO = {"displaylogo": False, "displayModeBar": False}
 
 AVISO = (
-    "Las señales y las inconsistencias son preguntas para investigar, no acusaciones ni prueba de "
-    "irregularidades. Pueden venir del documento original o de un error de lectura de esta herramienta. "
+    "Las señales e inconsistencias son preguntas para investigar, no acusaciones ni prueba de irregularidades. "
+    "Pueden venir del documento original o de un error de lectura de esta herramienta. "
     "Proyecto independiente, sin afiliación con la Universidad Nacional."
 )
 
-
-def _base(fig: go.Figure, t: dict, alto: int = 360) -> go.Figure:
-    fig.update_layout(
-        height=alto, margin=dict(l=8, r=16, t=8, b=8),
-        paper_bgcolor=t["superficie"], plot_bgcolor=t["superficie"],
-        font=dict(family='system-ui, -apple-system, "Segoe UI", sans-serif', color=t["tinta2"], size=13),
-        separators=",.", barcornerradius=4, bargap=0.35, bargroupgap=0.12,
-        legend=dict(orientation="h", yanchor="bottom", y=1.0, x=0, font=dict(color=t["tinta2"])),
-        hoverlabel=dict(bgcolor=t["superficie"], bordercolor=t["base"], font=dict(color=t["tinta"])),
-    )
-    eje = dict(gridcolor=t["rejilla"], linecolor=t["base"], zerolinecolor=t["base"], tickfont=dict(color=t["tenue"]),
-               tickformat=",.0f")
-    fig.update_xaxes(**eje)
-    fig.update_yaxes(**eje)
-    return fig
-
-
-def _vacio(t: dict, mensaje: str, alto: int = 240) -> go.Figure:
-    fig = _base(go.Figure(), t, alto)
-    fig.add_annotation(text=mensaje, showarrow=False, font=dict(color=t["tenue"], size=14), x=0.5, y=0.5,
-                       xref="paper", yref="paper")
-    fig.update_xaxes(visible=False)
-    fig.update_yaxes(visible=False)
-    return fig
+TABLA_ESTILO = dict(
+    style_table={"overflowX": "auto"},
+    style_cell={"fontFamily": F.FUENTE, "fontSize": "13px", "padding": "8px 10px", "textAlign": "left",
+                "whiteSpace": "normal", "height": "auto", "maxWidth": "380px",
+                "backgroundColor": "var(--superficie)", "color": "var(--tinta)",
+                "border": "none", "borderBottom": "1px solid var(--rejilla)"},
+    style_cell_conditional=[{"if": {"column_type": "numeric"}, "textAlign": "right",
+                             "fontVariantNumeric": "tabular-nums"}],
+    style_header={"fontWeight": "600", "backgroundColor": "var(--superficie)", "color": "var(--tinta2)",
+                  "borderBottom": "2px solid var(--rejilla)"},
+    style_data_conditional=[{"if": {"state": "active"}, "backgroundColor": "var(--resalte)",
+                             "border": "none", "borderBottom": "1px solid var(--rejilla)"}],
+    page_size=10, sort_action="native", markdown_options={"link_target": "_blank"},
+)
 
 
-def fig_partidas(p: pd.DataFrame, t: dict) -> go.Figure:
-    if p.empty:
-        return _vacio(t, "Sin datos para esta selección")
-    p = p.sort_values("presupuesto_total")
-    ejec = (p["total_gastado"] / p["presupuesto_total"].where(p["presupuesto_total"] != 0)).fillna(0)
-    hover = "<b>%{x:,.0f}</b> M<br>%{y}<extra>%{fullData.name}</extra>"
-    fig = go.Figure([
-        go.Bar(y=p["partida_nombre"], x=p["presupuesto_total"] / 1e6, name="Presupuesto total", orientation="h",
-               marker_color=t["presupuesto"], hovertemplate=hover),
-        go.Bar(y=p["partida_nombre"], x=p["total_gastado"] / 1e6, name="Ejecutado", orientation="h",
-               marker_color=t["gastado"], customdata=ejec,
-               hovertemplate="<b>%{x:,.0f}</b> M · %{customdata:.1%} ejecutado<br>%{y}<extra>Ejecutado</extra>"),
-    ])
-    # en barras horizontales la primera traza queda abajo: se invierte para que «Presupuesto» vaya arriba
-    fig.data = fig.data[::-1]
-    fig.update_layout(barmode="group", legend_traceorder="reversed")
-    fig.update_xaxes(title=dict(text="millones de colones", font=dict(color=t["tenue"])))
-    return _base(fig, t, alto=max(300, 64 * len(p)))
+# --- Piezas de interfaz -------------------------------------------------------
 
-
-def fig_anual(s: pd.DataFrame, t: dict) -> go.Figure:
-    if s["presupuesto_total"].isna().all():
-        return _vacio(t, "No hay informes de cierre (diciembre) para este programa")
-    fig = go.Figure()
-    for col, nombre, color in (("presupuesto_total", "Presupuesto total", t["presupuesto"]),
-                               ("total_gastado", "Ejecutado", t["gastado"])):
-        fig.add_trace(go.Scatter(
-            x=s["anio"], y=s[col] / 1e9, name=nombre, mode="lines+markers", connectgaps=False,
-            line=dict(color=color, width=2), marker=dict(size=8, color=color, line=dict(color=t["superficie"], width=2)),
-            hovertemplate="<b>₡%{y:,.1f} mil M</b><extra>" + nombre + "</extra>",
-        ))
-    fig.update_layout(hovermode="x unified")
-    fig.update_yaxes(title=dict(text="miles de millones de colones", font=dict(color=t["tenue"])), rangemode="tozero")
-    fig = _base(fig, t, 340)
-    fig.update_xaxes(dtick=1, showgrid=False, tickformat="d")  # años sin separador de miles
-    return fig
-
-
-def fig_modificaciones(p: pd.DataFrame, t: dict) -> go.Figure:
-    p = p[p["variaciones"].abs() >= 1e6].sort_values("variaciones")
-    if p.empty:
-        return _vacio(t, "Sin modificaciones relevantes")
-    colores = [t["sube"] if v > 0 else t["baja"] for v in p["variaciones"]]
-    fig = go.Figure(go.Bar(
-        y=p["partida_nombre"], x=p["variaciones"] / 1e6, orientation="h", marker_color=colores,
-        customdata=p["presupuesto_inicial"] / 1e6,
-        hovertemplate="<b>%{x:+,.0f}</b> M<br>%{y}<br>Presupuesto inicial: %{customdata:,.0f} M<extra></extra>",
-        showlegend=False,
-    ))
-    fig.update_xaxes(title=dict(text="millones de colones (recibió + / cedió −)", font=dict(color=t["tenue"])),
-                     zeroline=True, zerolinewidth=1)
-    return _base(fig, t, alto=max(240, 48 * len(p)))
-
-
-def fig_mensual(m: pd.DataFrame | None, t: dict) -> go.Figure:
-    if m is None:
-        return _vacio(t, "Este informe no trae el girado mes a mes (formato resumen)")
-    m = m.dropna()
-    m = m[m["girado"] != 0] if (m["girado"] != 0).any() else m
-    fig = go.Figure(go.Bar(
-        x=[MESES[i - 1] for i in m["mes"]], y=m["girado"] / 1e6, marker_color=t["gastado"], name="Girado",
-        hovertemplate="<b>%{y:,.0f}</b> M<extra>%{x}</extra>", showlegend=False,
-    ))
-    fig.update_yaxes(title=dict(text="millones de colones", font=dict(color=t["tenue"])))
-    fig.update_xaxes(showgrid=False)
-    return _base(fig, t, 300)
-
-
-def tarjeta(titulo: str, valor: str, nota: str = "") -> html.Div:
-    return html.Div(className="tarjeta", children=[
+def tarjeta(titulo: str, valor: str, nota: str = "", clase: str = "") -> html.Div:
+    return html.Div(className=f"tarjeta {clase}", children=[
         html.Div(titulo, className="tarjeta-titulo"),
         html.Div(valor, className="tarjeta-valor"),
         html.Div(nota, className="tarjeta-nota"),
     ])
 
 
-def seccion(titulo: str, subtitulo: str, *hijos) -> html.Section:
-    return html.Section(className="panel", children=[html.H2(titulo), html.P(subtitulo, className="sub"), *hijos])
+def panel(titulo: str, subtitulo: str | None, *hijos, clase: str = "") -> html.Section:
+    cabeza = [html.H3(titulo)]
+    if subtitulo:
+        cabeza.append(html.P(subtitulo, className="sub"))
+    return html.Section(className=f"panel {clase}", children=[*cabeza, *hijos])
 
 
-TABLA_ESTILO = dict(
-    style_table={"overflowX": "auto"},
-    style_cell={"fontFamily": 'system-ui, -apple-system, "Segoe UI", sans-serif', "fontSize": "13px", "padding": "6px 8px", "textAlign": "left",
-                "whiteSpace": "normal", "height": "auto", "maxWidth": "360px",
-                "backgroundColor": "var(--superficie)", "color": "var(--tinta)", "border": "1px solid var(--rejilla)"},
-    style_header={"fontWeight": "600", "backgroundColor": "var(--plano)", "color": "var(--tinta2)"},
-    page_size=12, sort_action="native", filter_action="native", markdown_options={"link_target": "_blank"},
-)
+def grafico(id_: str, **kw) -> dcc.Loading:
+    return dcc.Loading(dcc.Graph(id=id_, config=GRAFICO, **kw), type="dot", color="var(--acento)")
 
+
+def barra_ejecucion(ratio: float | None) -> html.Div:
+    """Medidor simple: cuánto del presupuesto se ejecutó (el exceso se marca aparte)."""
+    r = 0 if ratio is None or ratio != ratio else ratio
+    return html.Div(className="medidor", title=f"{D.porcentaje(r)} ejecutado", children=[
+        html.Div(className="medidor-relleno", style={"width": f"{min(r, 1) * 100:.1f}%"}),
+        html.Div(className="medidor-exceso", style={"display": "block" if r > 1 else "none"}),
+    ])
+
+
+def glosario() -> html.Details:
+    return html.Details(className="glosario", children=[
+        html.Summary("¿Cómo leer esto? Glosario en 1 minuto"),
+        html.Dl([x for termino, definicion in D.GLOSARIO for x in (html.Dt(termino), html.Dd(definicion))]),
+    ])
+
+
+def crear_layout(d: D.Datos) -> html.Main:
+    informes = D.informe_por_anio(d.ejecucion)
+    opciones_anio = [
+        {"label": f"{int(r.anio)}" + ("" if r.es_cierre else f" · al {D.fecha_larga(r.corte)}"), "value": r.corte}
+        for r in informes.itertuples()
+    ]
+    cierre = next((o["value"] for o in opciones_anio if D.es_cierre(o["value"])), opciones_anio[0]["value"])
+
+    return html.Main(className="pagina", children=[
+        dcc.Store(id="tema-efectivo"),
+        dcc.Store(id="cuenta"),
+        dcc.Store(id="filtro-senal"),
+        html.Header(className="cabecera", children=[
+            html.Div([
+                html.Div("Finanzas Abiertas CR", className="marca"),
+                html.H1("¿En qué gasta la Universidad Nacional?"),
+                html.P("Presupuesto, cambios y ejecución, leídos de los informes públicos del Programa de Gestión "
+                       "Financiera de la UNA.", className="sub"),
+            ]),
+            dcc.RadioItems(id="tema", value="auto", inline=True, className="tema",
+                           options=[{"label": "Auto", "value": "auto"}, {"label": "Claro", "value": "claro"},
+                                    {"label": "Oscuro", "value": "oscuro"}]),
+        ]),
+        html.Div(className="filtros", children=[
+            html.Label(["Año", dcc.Dropdown(id="anio", options=opciones_anio, value=cierre, clearable=False)]),
+            html.Label(["Programa", dcc.Dropdown(id="programa", value="integrado", clearable=False,
+                                                 options=[{"label": v, "value": k} for k, v in D.PROGRAMAS.items()])]),
+            glosario(),
+        ]),
+        html.Div(AVISO, className="aviso", role="note"),
+        dcc.Tabs(id="pestanas", value="resumen", className="pestanas", parent_className="pestanas-contenedor",
+                 children=[
+            dcc.Tab(label="Resumen", value="resumen", className="pestana", selected_className="pestana-activa",
+                    children=vista_resumen()),
+            dcc.Tab(label="Explorar el gasto", value="explorar", className="pestana",
+                    selected_className="pestana-activa", children=vista_explorar()),
+            dcc.Tab(label="Cambios al presupuesto", value="cambios", className="pestana",
+                    selected_className="pestana-activa", children=vista_cambios()),
+            dcc.Tab(label="Señales para revisar", value="senales", className="pestana",
+                    selected_className="pestana-activa", children=vista_senales()),
+            dcc.Tab(label="Calidad de los datos", value="calidad", className="pestana",
+                    selected_className="pestana-activa", children=vista_calidad()),
+        ]),
+        html.Footer(className="pie", children=[
+            "Fuente: ", html.A("documentos.una.ac.cr", href="https://documentos.una.ac.cr", target="_blank"),
+            " · información pública (art. 30 de la Constitución, Ley 10554). Código MIT · datos procesados "
+            "CC BY 4.0 · ", html.A("Metodología", target="_blank",
+                                   href="https://github.com/DavElizG/finanzas-abiertas-cr/blob/main/docs/metodologia.md"),
+        ]),
+    ])
+
+
+def vista_resumen():
+    return html.Div(className="vista", children=[
+        html.Div(id="r-narrativa", className="narrativa"),
+        html.Div(id="r-tarjetas", className="tarjetas"),
+        html.Div(className="rejilla", children=[
+            panel("¿A dónde va cada ₡100?", "Reparto del presupuesto total por partida. Haz clic en una barra para "
+                  "ver qué hay adentro.", grafico("r-cada100")),
+            panel("Presupuesto y ejecución por año", "La línea une los años cerrados. Un círculo vacío es el último informe de un año sin cierre publicado en Excel (2018, 2019) o todavía en curso.",
+                  grafico("r-anual")),
+            panel("¿Qué tanto se ejecuta cada partida?", "Porcentaje gastado al cierre de cada año. Color más intenso = "
+                  "más ejecutado. Los años sin informe de diciembre en Excel no aparecen.", grafico("r-calor")),
+            panel("Los tres programas", "Cómo se reparte el presupuesto de la universidad entre sus programas.",
+                  grafico("r-programas")),
+        ]),
+    ])
+
+
+def vista_explorar():
+    return html.Div(className="vista", children=[
+        html.P("Cada bloque es una cuenta: su tamaño es el presupuesto y su color, cuánto se ejecutó. Haz clic para "
+               "bajar de partida a grupo y a subpartida; la barra de arriba sirve para volver.", className="ayuda"),
+        html.Div(className="explorar", children=[
+            panel("Mapa del presupuesto", None, grafico("e-treemap"), clase="explorar-mapa"),
+            html.Div(id="e-ficha", className="explorar-ficha"),
+        ]),
+    ])
+
+
+def vista_cambios():
+    return html.Div(className="vista", children=[
+        html.Div(id="c-narrativa", className="narrativa"),
+        html.Div(className="rejilla", children=[
+            panel("Modificación por modificación", "En cada modificación interna lo que unas cuentas reciben "
+                  "(azul) otras lo ceden (rojo). Los extraordinarios agregan o quitan dinero.", grafico("c-linea")),
+            panel("Cambio neto por partida", "Suma de todos los cambios del año: recortes, modificaciones y "
+                  "extraordinarios.", grafico("c-partidas")),
+        ]),
+        panel("Las cuentas que más ganaron y más perdieron", "Subpartidas con el mayor cambio neto en el año. Haz "
+              "clic para ver la ficha.", grafico("c-mayores")),
+    ])
+
+
+def vista_senales():
+    return html.Div(className="vista", children=[
+        html.P("Reglas simples y públicas que marcan cuentas para mirar con más cuidado. Haz clic en un tipo de "
+               "señal para filtrar, y en una fila para abrir la ficha de la cuenta.", className="ayuda"),
+        html.Div(id="s-tipos", className="tipos-senal"),
+        html.Div(className="rejilla rejilla-1-2", children=[
+            panel("¿En qué partidas?", None, grafico("s-partidas")),
+            panel("Detalle", None, html.Div(id="s-filtro-activo", className="filtro-activo"),
+                  dash_table.DataTable(id="s-tabla", **TABLA_ESTILO)),
+        ]),
+        panel("Cuentas atípicas (exploratorio)", "Un modelo de aprendizaje automático (Isolation Forest) compara "
+              "cada subpartida de ₡10 millones o más con las demás y con su propia historia. «Atípica» significa "
+              "distinta, no incorrecta.", dash_table.DataTable(id="s-anomalias", **TABLA_ESTILO)),
+    ])
+
+
+def vista_calidad():
+    return html.Div(className="vista", children=[
+        html.P("Cifras que el propio documento dice que deberían coincidir y no coinciden. Antes de atribuirlas "
+               "al documento hay que descartar un error de lectura de esta herramienta.", className="ayuda"),
+        html.Div(className="rejilla rejilla-1-2", children=[
+            panel("Tipos de inconsistencia", None, grafico("q-reglas")),
+            panel("Casos", None, dash_table.DataTable(id="q-tabla", **TABLA_ESTILO)),
+        ]),
+    ])
+
+
+# --- Ficha de cuenta ----------------------------------------------------------
+
+def ficha(d: D.Datos, corte: str, programa: str, codigo: str | None, t: dict):
+    filas = D.filas_informe(d, corte, programa)
+    if codigo is None or codigo not in set(filas["codigo"]):
+        comp = D.composicion(filas)
+        return [panel("Elige una cuenta", "Haz clic en un bloque del mapa o en una barra de esta lista.",
+                      dcc.Graph(id="e-hijos", config=GRAFICO, figure=F.subcuentas(D.hijos(filas, None), t)),
+                      html.P(f"{len(comp)} partidas con presupuesto en este informe.", className="nota"))]
+
+    fila = filas[filas["codigo"] == codigo].iloc[0]
+    ruta = D.ruta_cuenta(codigo)
+    nombres = dict(zip(filas["codigo"], filas["nombre_corto"]))
+    migas = [html.Button("Todo", id={"tipo": "miga", "codigo": "TOTAL"}, className="miga")]
+    for c in ruta:
+        migas += [html.Span("›", className="miga-sep"),
+                  html.Button(nombres.get(c, c), id={"tipo": "miga", "codigo": c},
+                              className="miga actual" if c == codigo else "miga")]
+
+    pres, gas = fila["presupuesto_total"], fila["total_gastado"]
+    ratio = gas / pres if pres else None
+    cambio = fila["recortes"] + fila["total_variaciones"]
+    nivel = {"partida": "Partida", "grupo": "Grupo", "subpartida": "Subpartida"}[fila["nivel"]]
+
+    hijos = D.hijos(filas, codigo)
+    s = D.senales_de(d, corte, programa, codigo)
+    contenido = [
+        html.Div(migas, className="migas"),
+        html.Div(className="ficha-cabeza", children=[
+            html.Div([html.Span(f"{nivel} {codigo}", className="etiqueta"), html.H2(fila["nombre_corto"])]),
+            html.A("Ver documento original ↗", href=fila["fuente_url"], target="_blank", className="boton-enlace"),
+        ]),
+        html.P(f"Hoja «{fila['hoja']}», fila {int(fila['fila_excel'])} del Excel.", className="nota"),
+        html.Div(className="tarjetas tarjetas-ficha", children=[
+            tarjeta("Presupuesto inicial", D.dinero(fila["presupuesto_inicial"])),
+            tarjeta("Cambios en el año", D.dinero(cambio), "recortes, modificaciones y extraordinarios"),
+            tarjeta("Presupuesto total", D.dinero(pres)),
+            tarjeta("Ejecutado", D.dinero(gas), D.porcentaje(ratio, 0) + " del total"),
+        ]),
+        barra_ejecucion(ratio),
+    ]
+    if not s.empty:
+        contenido.append(html.Div(className="lista-senales", children=[
+            html.H4(f"Señales para revisar ({len(s)})"),
+            html.Ul([html.Li([html.Strong(D.SENALES[x.senal][0]), f" · {x.nombre} ({x.codigo}): ",
+                              D.SENALES[x.senal][1], f" Monto: {D.dinero(x.monto)}."])
+                     for x in s.itertuples()]),
+        ]))
+    if not hijos.empty:
+        contenido.append(panel(f"Qué hay adentro ({len(hijos)})", "Clic en una barra para bajar un nivel.",
+                               dcc.Graph(id="e-hijos", config=GRAFICO, figure=F.subcuentas(hijos, t))))
+    else:
+        contenido.append(dcc.Graph(id="e-hijos", style={"display": "none"}, figure=F.vacio(t, "")))
+    contenido += [
+        html.Div(className="rejilla", children=[
+            panel("Historia de esta cuenta", "Línea: años cerrados. Círculo vacío: año sin cierre o en curso.",
+                  dcc.Graph(config=GRAFICO, figure=F.anual(D.serie_anual(d, programa, codigo), t, 260))),
+            panel("Pagado mes a mes", None,
+                  dcc.Graph(config=GRAFICO, figure=F.mensual(D.girado_mensual(filas, codigo), t))),
+        ]),
+        panel("Modificaciones de este año", "Azul: la cuenta recibió dinero. Rojo: lo cedió.",
+              dcc.Graph(config=GRAFICO, figure=F.mods_cuenta(D.modificaciones_cuenta(d, corte, programa, codigo), t))),
+    ]
+    return contenido
+
+
+# --- App ----------------------------------------------------------------------
 
 def crear_app(carpeta: Path | None = None) -> Dash:
     d = D.cargar(carpeta)
-    app = Dash(__name__, title="Finanzas Abiertas CR", assets_folder=str(ASSETS))
+    app = Dash(__name__, title="Finanzas Abiertas CR", assets_folder=str(ASSETS), suppress_callback_exceptions=True)
 
     if d.vacio:
         app.layout = html.Main(className="pagina", children=[
@@ -166,58 +286,7 @@ def crear_app(carpeta: Path | None = None) -> Dash:
         ])
         return app
 
-    informes = D.informe_por_anio(d.ejecucion)
-    opciones_anio = [
-        {"label": f"{int(r.anio)}" + ("" if r.es_cierre else f" (parcial, corte {r.corte})"), "value": r.corte}
-        for r in informes.itertuples()
-    ]
-
-    app.layout = html.Main(className="pagina", children=[
-        html.Header(className="cabecera", children=[
-            html.Div([
-                html.H1("Finanzas Abiertas CR"),
-                html.P("¿En qué gasta la Universidad Nacional? Presupuesto, modificaciones y ejecución, "
-                       "tomados de los informes públicos del Programa de Gestión Financiera.", className="sub"),
-            ]),
-            dcc.RadioItems(id="tema", value="auto", inline=True, className="tema",
-                           options=[{"label": "Auto", "value": "auto"}, {"label": "Claro", "value": "claro"},
-                                    {"label": "Oscuro", "value": "oscuro"}]),
-        ]),
-        html.Div(AVISO, className="aviso", role="note"),
-        html.Div(className="filtros", children=[
-            html.Label(["Año", dcc.Dropdown(id="anio", options=opciones_anio, value=opciones_anio[0]["value"],
-                                            clearable=False)]),
-            html.Label(["Programa", dcc.Dropdown(id="programa", value="integrado", clearable=False,
-                                                 options=[{"label": v, "value": k} for k, v in D.PROGRAMAS.items()])]),
-        ]),
-        html.Div(id="tarjetas", className="tarjetas"),
-        dcc.Store(id="tema-efectivo"),
-        html.Div(className="rejilla", children=[
-            seccion("¿En qué se gasta?", "Presupuesto total y ejecutado por partida del clasificador por objeto del gasto.",
-                    dcc.Graph(id="g-partidas", config={"displaylogo": False, "displayModeBar": False})),
-            seccion("Hacia dónde se movió el dinero", "Cambio neto por partida por modificaciones internas, "
-                    "presupuestos extraordinarios y recortes.",
-                    dcc.Graph(id="g-modificaciones", config={"displaylogo": False, "displayModeBar": False})),
-            seccion("Presupuesto y ejecución por año", "Solo informes de cierre (31 de diciembre). Los años sin "
-                    "informe de diciembre publicado en Excel quedan en blanco.",
-                    dcc.Graph(id="g-anual", config={"displaylogo": False, "displayModeBar": False})),
-            seccion("Girado mes a mes", "Un pico en diciembre puede indicar gasto acumulado para fin de año.",
-                    dcc.Graph(id="g-mensual", config={"displaylogo": False, "displayModeBar": False})),
-        ]),
-        seccion("Señales para revisar", "Cuentas (subpartidas) que cumplen alguna regla de docs/metodologia.md. "
-                "Haz clic en «documento» para ver la fuente original.",
-                dash_table.DataTable(id="t-senales", **TABLA_ESTILO)),
-        seccion("Inconsistencias del documento", "Cifras que el propio documento dice que deberían coincidir y no "
-                "coinciden. Primero hay que descartar un error de lectura de esta herramienta.",
-                dash_table.DataTable(id="t-validacion", **TABLA_ESTILO)),
-        seccion("Cuentas atípicas (exploratorio)", "Isolation Forest sobre las subpartidas de ₡10 M o más al cierre "
-                "de cada año. Un puntaje alto indica que la cuenta se comporta distinto al resto, no que esté mal.",
-                dash_table.DataTable(id="t-anomalias", **TABLA_ESTILO)),
-        html.Footer(className="pie", children=[
-            "Fuente: ", html.A("documentos.una.ac.cr", href="https://documentos.una.ac.cr", target="_blank"),
-            " (información pública, art. 30 de la Constitución y Ley 10554). Código MIT · datos procesados CC BY 4.0.",
-        ]),
-    ])
+    app.layout = crear_layout(d)
 
     clientside_callback(
         """function(valor){
@@ -229,85 +298,215 @@ def crear_app(carpeta: Path | None = None) -> Dash:
         Output("tema-efectivo", "data"), Input("tema", "value"),
     )
 
+    # Resumen ------------------------------------------------------------------
     @app.callback(
-        Output("tarjetas", "children"), Output("g-partidas", "figure"), Output("g-modificaciones", "figure"),
-        Output("g-anual", "figure"), Output("g-mensual", "figure"),
-        Output("t-senales", "data"), Output("t-senales", "columns"),
-        Output("t-validacion", "data"), Output("t-validacion", "columns"),
-        Output("t-anomalias", "data"), Output("t-anomalias", "columns"),
+        Output("r-narrativa", "children"), Output("r-tarjetas", "children"), Output("r-cada100", "figure"),
+        Output("r-anual", "figure"), Output("r-calor", "figure"), Output("r-programas", "figure"),
         Input("anio", "value"), Input("programa", "value"), Input("tema-efectivo", "data"),
     )
-    def actualizar(corte, programa, tema):
-        t = TEMAS.get(tema or "claro", TEMAS["claro"])
+    def resumen(corte, programa, tema):
+        t = F.tema(tema)
+        filas = D.filas_informe(d, corte, programa)
+        comp = D.composicion(filas)
+        pres, gas = comp["presupuesto_total"].sum(), comp["total_gastado"].sum()
+        inicial = comp["presupuesto_inicial"].sum()
+        s = D.senales_de(d, corte, programa)
+        frases = D.narrativa(d, corte, programa)
+        narrativa = [html.P(frases[0], className="titular")] + [html.P(f) for f in frases[1:]]
+        tarjetas = [
+            tarjeta("Presupuesto total", D.dinero(pres), f"inicial {D.dinero(inicial)}"),
+            tarjeta("Ejecutado", D.dinero(gas), "al " + D.fecha_larga(corte)),
+            html.Div(className="tarjeta", children=[
+                html.Div("Ejecución", className="tarjeta-titulo"),
+                html.Div(D.porcentaje(gas / pres if pres else None, 1), className="tarjeta-valor"),
+                barra_ejecucion(gas / pres if pres else None),
+            ]),
+            tarjeta("Señales para revisar", str(len(s)), f"en {s['codigo'].nunique() if not s.empty else 0} cuentas"),
+        ]
+        return (narrativa, tarjetas, F.de_cada_100(comp, t), F.anual(D.serie_anual(d, programa), t),
+                F.mapa_calor(D.mapa_ejecucion(d, programa), t), F.programas(D.comparar_programas(d, corte), t))
+
+    # Explorar -----------------------------------------------------------------
+    @app.callback(
+        Output("e-treemap", "figure"), Output("e-ficha", "children"),
+        Input("anio", "value"), Input("programa", "value"), Input("tema-efectivo", "data"), Input("cuenta", "data"),
+    )
+    def explorar(corte, programa, tema, codigo):
+        t = F.tema(tema)
+        filas = D.filas_informe(d, corte, programa)
+        arbol = D.arbol(filas)
+        # el mapa se abre en la cuenta elegida; si es una hoja, en su cuenta padre para ver a sus hermanas
+        nivel = codigo
+        if codigo is not None and codigo not in set(arbol["padre_id"]):
+            padre = arbol.loc[arbol["codigo"] == codigo, "padre_id"]
+            nivel = padre.iloc[0] if not padre.empty else None
+        return F.treemap(arbol, t, nivel), ficha(d, corte, programa, codigo, t)
+
+    @app.callback(
+        Output("cuenta", "data"), Output("pestanas", "value"),
+        Input("e-treemap", "clickData"), Input("e-hijos", "clickData"), Input("r-cada100", "clickData"),
+        Input("c-partidas", "clickData"), Input("c-mayores", "clickData"),
+        Input({"tipo": "miga", "codigo": ALL}, "n_clicks"), Input("s-tabla", "active_cell"),
+        State("s-tabla", "derived_viewport_data"), State("cuenta", "data"),
+        prevent_initial_call=True,
+    )
+    def elegir_cuenta(c_tree, c_hijos, c_100, c_part, c_may, migas, celda, filas_tabla, actual):
+        origen = ctx.triggered_id
+        if origen is None:
+            return no_update, no_update
+        if isinstance(origen, dict):  # miga de pan
+            if not ctx.triggered[0]["value"]:  # botón recién creado, sin clic
+                return no_update, no_update
+            return (None if origen["codigo"] == "TOTAL" else origen["codigo"]), no_update
+        if origen == "s-tabla":
+            if not celda or not filas_tabla:
+                return no_update, no_update
+            return filas_tabla[celda["row"]]["codigo"], "explorar"
+        clic = {"e-treemap": c_tree, "e-hijos": c_hijos, "r-cada100": c_100,
+                "c-partidas": c_part, "c-mayores": c_may}[origen]
+        if not clic or not clic.get("points"):
+            return no_update, no_update
+        punto = clic["points"][0]
+        if origen == "e-treemap":
+            codigo = punto.get("id")
+            if codigo == "TOTAL":
+                return None, no_update
+            # al hacer clic en la cuenta ya abierta, el treemap sube un nivel
+            if codigo == actual and punto.get("parent") not in (None, "", "TOTAL"):
+                return punto["parent"], no_update
+            return (None if codigo == actual else codigo), no_update
+        codigo = (punto.get("customdata") or [None])[0]
+        if not codigo:
+            return no_update, no_update
+        return codigo, ("explorar" if origen != "e-hijos" else no_update)
+
+    # Cambios ------------------------------------------------------------------
+    @app.callback(
+        Output("c-narrativa", "children"), Output("c-linea", "figure"), Output("c-partidas", "figure"),
+        Output("c-mayores", "figure"),
+        Input("anio", "value"), Input("programa", "value"), Input("tema-efectivo", "data"),
+    )
+    def cambios(corte, programa, tema):
+        t = F.tema(tema)
         filas = D.filas_informe(d, corte, programa)
         p = D.por_partida(filas)
-        anio = int(corte[:4])
-        es_cierre = corte.endswith("-12-31") or corte.endswith("-12-30")
+        mods = D.modificaciones_informe(d, corte, programa)
+        inicial, total = p["presupuesto_inicial"].sum(), p["presupuesto_total"].sum()
+        frases = [f"Se aprobaron {D.dinero(inicial)} al inicio del año y el presupuesto terminó en "
+                  f"{D.dinero(total)} ({'+' if total >= inicial else '−'}{D.dinero(abs(total - inicial))})."]
+        if not mods.empty:
+            internas = mods[mods["tipo"] == "interna"]
+            extra = mods[mods["tipo"] == "extraordinario"]
+            if not internas.empty:
+                frases.append(f"Hubo {len(internas)} modificaciones internas que trasladaron "
+                              f"{D.dinero(internas['recibio'].sum())} entre cuentas. La más grande fue la "
+                              f"{internas.loc[internas['recibio'].idxmax(), 'etiqueta']} "
+                              f"({D.dinero(internas['recibio'].max())}).")
+            if not extra.empty:
+                neto = extra["recibio"].sum() + extra["cedio"].sum()
+                frases.append(f"Los {len(extra)} presupuestos extraordinarios "
+                              f"{'agregaron' if neto >= 0 else 'quitaron'} {D.dinero(abs(neto))} en neto.")
+        return ([html.P(f) for f in frases], F.linea_mods(mods, t), F.cambios_partida(p, t),
+                F.mayores_cambios(D.mayores_cambios(filas), t))
 
-        pres = p["presupuesto_total"].sum()
-        gas = p["total_gastado"].sum()
-        sen = d.senales
-        sen = sen[(sen["corte"] == corte) & (sen["programa"] == programa)] if not sen.empty else sen
-        val = d.validacion
-        val = val[(val["corte"] == corte) & ((val["programa"] == programa) | val["programa"].isna())] if not val.empty else val
+    # Señales ------------------------------------------------------------------
+    @app.callback(
+        Output("filtro-senal", "data"),
+        Input({"tipo": "tipo-senal", "senal": ALL}, "n_clicks"), State("filtro-senal", "data"),
+        prevent_initial_call=True,
+    )
+    def filtrar_senal(_clics, actual):
+        origen = ctx.triggered_id
+        if not isinstance(origen, dict) or not ctx.triggered[0]["value"]:
+            return no_update
+        if origen["senal"] == "__todas__" or origen["senal"] == actual:
+            return None
+        return origen["senal"]
 
-        tarjetas = [
-            tarjeta("Presupuesto total", D.colones_m(pres), f"inicial {D.colones_m(p['presupuesto_inicial'].sum())}"),
-            tarjeta("Ejecutado", D.colones_m(gas), f"corte {corte}" + ("" if es_cierre else " · año en curso")),
-            tarjeta("Ejecución", D.porcentaje(gas / pres if pres else None), "ejecutado / presupuesto total"),
-            tarjeta("Señales para revisar", f"{len(sen)}", "en subpartidas"),
-            tarjeta("Inconsistencias", f"{len(val)}", "en el documento o la lectura"),
-        ]
-
-        # Tablas
-        cols_s = [("Señal", "senal_txt", "text"), ("Código", "codigo", "text"), ("Cuenta", "nombre", "text"),
-                  ("Partida", "partida_nombre", "text"), ("Monto (₡ M)", "monto_m", "numeric"),
-                  ("Referencia (₡ M)", "referencia_m", "numeric"), ("Fuente", "fuente", "text")]
-        if not sen.empty:
-            s = sen.assign(senal_txt=sen["senal"].map(D.SENALES), monto_m=(sen["monto"] / 1e6).round(1),
-                           referencia_m=(sen["referencia"] / 1e6).round(1),
-                           fuente=sen["fuente_url"].map(lambda u: f"[documento]({u})"))
-            s = s.sort_values("monto_m", key=abs, ascending=False)
-            datos_s = s[[c for _, c, _ in cols_s]].to_dict("records")
+    @app.callback(
+        Output("s-tipos", "children"), Output("s-partidas", "figure"), Output("s-filtro-activo", "children"),
+        Output("s-tabla", "data"), Output("s-tabla", "columns"), Output("s-tabla", "active_cell"),
+        Output("s-anomalias", "data"), Output("s-anomalias", "columns"),
+        Input("anio", "value"), Input("programa", "value"), Input("tema-efectivo", "data"),
+        Input("filtro-senal", "data"),
+    )
+    def senales(corte, programa, tema, filtro):
+        t = F.tema(tema)
+        s = D.senales_de(d, corte, programa)
+        res = D.resumen_senales(s)
+        por_tipo = {r.senal: r for r in res.itertuples()}
+        tipos = []
+        for clave, (titulo, explicacion) in D.SENALES.items():
+            r = por_tipo.get(clave)
+            n = int(r.cuentas) if r is not None else 0
+            clase = "tipo" + (" activo" if filtro == clave else "") + (" cero" if n == 0 else "")
+            tipos.append(html.Button(id={"tipo": "tipo-senal", "senal": clave}, className=clase, disabled=n == 0,
+                                     children=[html.Div(str(n), className="tipo-n"),
+                                               html.Div(titulo, className="tipo-titulo"),
+                                               html.Div(explicacion, className="tipo-texto"),
+                                               html.Div(D.dinero(r.monto) if r is not None else "",
+                                                        className="tipo-monto")]))
+        visibles = s[s["senal"] == filtro] if filtro and not s.empty else s
+        aviso = ([f"Mostrando: {D.SENALES[filtro][0]} · ",
+                  html.Button("quitar filtro", id={"tipo": "tipo-senal", "senal": "__todas__"}, className="enlace")]
+                 if filtro else "Todas las señales de este informe.")
+        columnas = [{"name": "Señal", "id": "senal_txt"}, {"name": "Cuenta", "id": "cuenta"},
+                    {"name": "Partida", "id": "partida_nombre"},
+                    {"name": "Monto", "id": "monto_txt"}, {"name": "Referencia", "id": "ref_txt"},
+                    {"name": "Fuente", "id": "fuente", "presentation": "markdown"}]
+        if visibles.empty:
+            filas_tabla = []
         else:
-            datos_s = []
-        columnas_s = [{"name": n, "id": c, "type": ty, **({"presentation": "markdown"} if c == "fuente" else {})}
-                      for n, c, ty in cols_s]
+            v = visibles.assign(
+                senal_txt=visibles["senal"].map(lambda k: D.SENALES[k][0]),
+                cuenta=[f"{n} ({c})" for n, c in zip(visibles["nombre"], visibles["codigo"])],
+                monto_txt=visibles["monto"].map(D.dinero), ref_txt=visibles["referencia"].map(D.dinero),
+                fuente=visibles["fuente_url"].map(lambda u: f"[documento ↗]({u})"),
+                orden=visibles["monto"].abs(),
+            ).sort_values("orden", ascending=False)
+            filas_tabla = v[["senal_txt", "cuenta", "partida_nombre", "monto_txt", "ref_txt", "fuente",
+                             "codigo"]].to_dict("records")
 
-        cols_v = [("Regla", "regla_txt", "text"), ("Código", "codigo", "text"), ("Cuenta", "nombre", "text"),
-                  ("Campo", "campo", "text"), ("Diferencia (₡ M)", "dif_m", "numeric"), ("Detalle", "detalle", "text")]
-        if not val.empty:
-            v = val.assign(regla_txt=val["regla"].map(D.REGLAS).fillna(val["regla"]),
-                           dif_m=(pd.to_numeric(val.get("diferencia"), errors="coerce") / 1e6).round(2))
-            v = v.sort_values("dif_m", key=lambda x: x.abs(), ascending=False, na_position="first")
-            datos_v = v[[c for _, c, _ in cols_v]].fillna("").to_dict("records")
-        else:
-            datos_v = []
-        columnas_v = [{"name": n, "id": c, "type": ty} for n, c, ty in cols_v]
-
-        cols_a = [("Año", "anio", "numeric"), ("Programa", "programa", "text"), ("Código", "codigo", "text"),
-                  ("Cuenta", "nombre", "text"), ("Presupuesto (₡ M)", "pres_m", "numeric"),
-                  ("Ejecución", "ejec", "text"), ("Puntaje", "puntaje", "numeric")]
+        cols_a = [{"name": "Año", "id": "anio"}, {"name": "Programa", "id": "programa_txt"},
+                  {"name": "Cuenta", "id": "cuenta"}, {"name": "Presupuesto", "id": "pres"},
+                  {"name": "Ejecutado", "id": "ejec"}, {"name": "Cambio en el año", "id": "var"}]
         an = d.anomalias
-        if not an.empty:
+        if an.empty:
+            filas_a = []
+        else:
             a = an[an["atipico"]]
             if programa != "integrado":
                 a = a[a["programa"] == programa]
-            a = a.assign(programa=a["programa"].map(D.PROGRAMAS), pres_m=(a["presupuesto_total"] / 1e6).round(1), ejec=a["ejecucion"].map(D.porcentaje),
-                         puntaje=a["puntaje_anomalia"].round(3))
-            datos_a = a[[c for _, c, _ in cols_a]].to_dict("records")
-        else:
-            datos_a = []
-        columnas_a = [{"name": n, "id": c, "type": ty} for n, c, ty in cols_a]
+            a = a.assign(programa_txt=a["programa"].map(D.PROGRAMAS),
+                         cuenta=[f"{n} ({c})" for n, c in zip(a["nombre"], a["codigo"])],
+                         pres=a["presupuesto_total"].map(D.dinero), ejec=a["ejecucion"].map(D.porcentaje),
+                         var=a["variacion_relativa"].map(lambda x: ("+" if x > 0 else "") + D.porcentaje(x, 0)))
+            filas_a = a[[c["id"] for c in cols_a]].to_dict("records")
+        return (tipos, F.senales_por_partida(visibles, t), aviso, filas_tabla, columnas, None, filas_a, cols_a)
 
-        return (
-            tarjetas,
-            fig_partidas(p, t),
-            fig_modificaciones(p, t),
-            fig_anual(D.serie_anual(d, programa), t),
-            fig_mensual(D.girado_mensual(filas), t),
-            datos_s, columnas_s, datos_v, columnas_v, datos_a, columnas_a,
-        )
+    # Calidad ------------------------------------------------------------------
+    @app.callback(
+        Output("q-reglas", "figure"), Output("q-tabla", "data"), Output("q-tabla", "columns"),
+        Input("anio", "value"), Input("programa", "value"), Input("tema-efectivo", "data"),
+    )
+    def calidad(corte, programa, tema):
+        t = F.tema(tema)
+        v = d.validacion
+        if not v.empty:
+            v = v[(v["corte"] == corte) & ((v["programa"] == programa) | v["programa"].isna())]
+        columnas = [{"name": "Tipo", "id": "regla_txt"}, {"name": "Cuenta", "id": "cuenta"},
+                    {"name": "Debería ser", "id": "esperado_txt"}, {"name": "El documento dice", "id": "encontrado_txt"},
+                    {"name": "Detalle", "id": "detalle"}]
+        if v.empty:
+            return F.calidad(v, t), [], columnas
+        w = v.assign(
+            regla_txt=v["regla"].map(D.REGLAS).fillna(v["regla"]),
+            cuenta=[(f"{n} ({c})" if isinstance(n, str) and n else (c if isinstance(c, str) else ""))
+                    for n, c in zip(v.get("nombre"), v.get("codigo"))],
+            esperado_txt=v["esperado"].map(D.dinero), encontrado_txt=v["encontrado"].map(D.dinero),
+            orden=v["diferencia"].abs(),
+        ).sort_values("orden", ascending=False, na_position="first")
+        return F.calidad(v, t), w[[c["id"] for c in columnas]].fillna("").to_dict("records"), columnas
 
     return app
 

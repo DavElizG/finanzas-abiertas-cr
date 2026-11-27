@@ -48,9 +48,27 @@ def test_anomalias_encuentra_la_cuenta_rara():
 
 
 def test_formatos():
-    assert D.colones_m(12_345_678_901) == "₡12.346 M"
+    assert D.dinero(156_705_000_000) == "₡156,7 mil millones"
+    assert D.dinero(845_300_000) == "₡845 millones"
+    assert D.dinero(12_345_678) == "₡12,3 millones"
+    assert D.dinero(-12_345) == "−₡12.345"
+    assert D.dinero(float("nan")) == "—"
     assert D.porcentaje(0.858) == "85,8 %"
-    assert D.colones_m(float("nan")) == "—"
+    assert D.porcentaje(-0.0001, 0) == "0 %"  # nunca «-0 %»
+    assert D.fecha_larga("2025-06-30") == "30 de junio de 2025"
+
+
+def test_nombre_cuenta():
+    assert D.nombre_cuenta("0.00.00", "REMUNERACIONES") == "Remuneraciones"
+    assert D.nombre_cuenta("0.01.00", "REMUNERACIONES BASICAS") == "Remuneraciones basicas"
+    assert D.nombre_cuenta("0.01.01", "Sueldos para Cargos Fijos") == "Sueldos para Cargos Fijos"
+
+
+def test_ruta_y_prefijo():
+    assert D.ruta_cuenta("0.01.05") == ["0.00.00", "0.01.00", "0.01.05"]
+    assert D.ruta_cuenta("5.02.00") == ["5.00.00", "5.02.00"]
+    assert D.ruta_cuenta("5.00.00") == ["5.00.00"]
+    assert D.prefijo("5.00.00") == "5." and D.prefijo("5.02.00") == "5.02." and D.prefijo("5.02.01") == "5.02.01"
 
 
 def test_informe_por_anio_prefiere_el_cierre():
@@ -61,22 +79,100 @@ def test_informe_por_anio_prefiere_el_cierre():
     assert list(r["es_cierre"]) == [False, True]
 
 
+def con_partidas(ej):
+    """Agrega las filas de partida y grupo que suman a las subpartidas sintéticas."""
+    claves = ["anio", "corte", "mes_corte", "bitstream_id", "programa", "fuente_url"]
+    montos = ["presupuesto_inicial", "recortes", "total_variaciones", "presupuesto_total", "total_gastado", "girado",
+              "compromisos", "disponible"] + [f"girado_m{m:02d}" for m in range(1, 13)]
+    p = ej.groupby(claves, as_index=False)[montos].sum()
+    partida = p.assign(codigo="1.00.00", nivel="partida", partida="1", padre=None, nombre="SERVICIOS",
+                       partida_nombre="Servicios", hoja="h", fila_excel=10)
+    grupo = p.assign(codigo="1.01.00", nivel="grupo", partida="1", padre="1.00.00", nombre="ALQUILERES",
+                     partida_nombre="Servicios", hoja="h", fila_excel=11)
+    sub = ej.assign(padre="1.01.00", hoja="h", fila_excel=12)
+    return pd.concat([partida, grupo, sub], ignore_index=True)
+
+
+def guardar(tmp_path, n_cuentas=3):
+    ej = con_partidas(ejecucion_sintetica(n_cuentas=n_cuentas))
+    ej.to_csv(tmp_path / "ejecucion.csv", index=False)
+    mods = pd.DataFrame([
+        {"corte": "2023-12-31", "programa": "academico", "codigo": "1.01.00", "nivel": "subpartida",
+         "tipo": "interna", "numero": 1, "monto": 5e6},
+        {"corte": "2023-12-31", "programa": "academico", "codigo": "1.01.01", "nivel": "subpartida",
+         "tipo": "interna", "numero": 1, "monto": -5e6},
+        {"corte": "2023-12-31", "programa": "academico", "codigo": "1.01.02", "nivel": "subpartida",
+         "tipo": "extraordinario", "numero": 1, "monto": 2e6},
+    ])
+    mods.to_csv(tmp_path / "modificaciones.csv", index=False)
+    return D.cargar(tmp_path)
+
+
+def test_arbol_las_hojas_llevan_el_valor(tmp_path):
+    d = guardar(tmp_path)
+    a = D.arbol(D.filas_informe(d, "2023-12-31", "academico"))
+    assert set(a.loc[a["hoja"], "nivel"]) == {"subpartida"}
+    assert (a.loc[~a["hoja"], "valor"] == 0).all()
+    assert a.loc[a["codigo"] == "1.00.00", "padre_id"].item() == "TOTAL"
+
+
+def test_modificaciones_internas_netean_cero(tmp_path):
+    d = guardar(tmp_path)
+    g = D.modificaciones_informe(d, "2023-12-31", "academico")
+    interna = g[g["tipo"] == "interna"].iloc[0]
+    assert interna["recibio"] == 5e6 and interna["cedio"] == -5e6 and interna["etiqueta"] == "Mod. 1"
+    assert g[g["tipo"] == "extraordinario"].iloc[0]["etiqueta"] == "Extra. 1"
+
+
+def test_narrativa(tmp_path):
+    d = guardar(tmp_path)
+    frases = D.narrativa(d, "2023-12-31", "academico")
+    assert frases[0].startswith("En 2023, el programa académico tuvo un presupuesto de ₡")
+    assert any("de cada ₡100" in f for f in frases)
+    assert any("1 modificaciones internas" in f for f in frases)
+
+
+def test_serie_anual_marca_los_cierres(tmp_path):
+    d = guardar(tmp_path)
+    s = D.serie_anual(d, "academico")
+    assert list(s["anio"]) == [2021, 2022, 2023]
+    assert s["es_cierre"].all()
+
+
+def test_tinta_contrasta():
+    from finanzas_cr.dashboard.figuras import tinta_sobre
+
+    assert tinta_sobre("#cde2fb") == "#0b0b0b"  # celda clara → texto oscuro
+    assert tinta_sobre("#0d366b") == "#ffffff"  # celda oscura → texto claro
+
+
+def test_figuras_con_datos_reales_del_formato(tmp_path):
+    pytest.importorskip("plotly")
+    from finanzas_cr.dashboard import figuras as F
+
+    d = guardar(tmp_path)
+    filas = D.filas_informe(d, "2023-12-31", "academico")
+    for nombre in ("claro", "oscuro"):
+        t = F.tema(nombre)
+        assert len(F.treemap(D.arbol(filas), t, "1.01.00").data) == 1
+        assert len(F.de_cada_100(D.composicion(filas), t).data) == 1
+        assert len(F.anual(D.serie_anual(d, "academico"), t).data) == 2
+        assert F.mapa_calor(D.mapa_ejecucion(d, "academico"), t).layout.annotations
+        assert len(F.linea_mods(D.modificaciones_informe(d, "2023-12-31", "academico"), t).data) == 2
+
+
 def test_dashboard_se_construye(tmp_path):
     pytest.importorskip("dash")
-    from finanzas_cr.dashboard.app import TEMAS, crear_app, fig_anual, fig_partidas
+    from finanzas_cr.dashboard.app import crear_app, ficha
+    from finanzas_cr.dashboard import figuras as F
 
-    ej = ejecucion_sintetica(n_cuentas=3)
-    partidas = ej.groupby(["anio", "corte", "mes_corte", "bitstream_id", "programa", "fuente_url"], as_index=False)[
-        ["presupuesto_inicial", "recortes", "total_variaciones", "presupuesto_total", "total_gastado", "girado"]].sum()
-    partidas = partidas.assign(codigo="1.00.00", nivel="partida", partida="1")
-    pd.concat([ej, partidas]).to_csv(tmp_path / "ejecucion.csv", index=False)
+    d = guardar(tmp_path)
     app = crear_app(tmp_path)
     assert app.title == "Finanzas Abiertas CR"
-
-    datos = D.cargar(tmp_path)
-    filas = D.filas_informe(datos, "2023-12-31", "academico")
-    assert len(fig_partidas(D.por_partida(filas), TEMAS["claro"]).data) == 2
-    assert len(fig_anual(D.serie_anual(datos, "academico"), TEMAS["oscuro"]).data) == 2
+    assert len(app.callback_map) >= 6
+    # la ficha funciona en los tres niveles y sin cuenta elegida
+    for codigo in (None, "1.00.00", "1.01.00", "1.01.01"):
+        assert ficha(d, "2023-12-31", "academico", codigo, F.tema("claro"))
 
 
 def test_dashboard_sin_datos(tmp_path):

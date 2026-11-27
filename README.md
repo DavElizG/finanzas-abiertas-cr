@@ -11,7 +11,12 @@ Herramienta de código abierto para descargar, normalizar y visualizar los datos
 3. **Valida** que las cifras del documento cuadren consigo mismas: identidades contables, jerarquía de cuentas, total del documento y suma de programas.
 4. **Marca señales** con reglas simples y públicas: sobregiros, gasto sin presupuesto, modificaciones grandes, subejecución y gasto concentrado en diciembre.
 5. **Detecta cuentas atípicas** con un modelo exploratorio (Isolation Forest).
-6. **Muestra todo** en un dashboard de Plotly Dash.
+6. **Muestra todo** en un dashboard de Plotly Dash, con cinco pestañas:
+   - **Resumen**: qué pasó en el año contado en frases simples, a dónde va cada ₡100, cómo evolucionó el presupuesto, qué tanto se ejecuta cada partida y cómo se reparte entre programas.
+   - **Explorar el gasto**: un mapa por el que se baja de partida a grupo y a subpartida. Cada cuenta tiene una ficha con su historia, lo pagado mes a mes, sus modificaciones, sus señales y la hoja y fila exactas del Excel original.
+   - **Cambios al presupuesto**: cada modificación interna y cada presupuesto extraordinario, y las cuentas que más dinero ganaron o perdieron.
+   - **Señales para revisar**: tarjetas que explican cada tipo de señal y sirven de filtro; un clic en una fila abre la ficha de esa cuenta.
+   - **Calidad de los datos**: las inconsistencias internas de cada documento.
 
 ## Fuentes y marco legal
 
