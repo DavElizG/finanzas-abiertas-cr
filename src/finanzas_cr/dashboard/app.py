@@ -88,7 +88,8 @@ def glosario() -> html.Details:
 def crear_layout(d: D.Datos) -> html.Main:
     informes = D.informe_por_anio(d.ejecucion)
     opciones_anio = [
-        {"label": f"{int(r.anio)}" + ("" if r.es_cierre else f" · al {D.fecha_larga(r.corte)}"), "value": r.corte}
+        {"label": f"{int(r.anio)}" + ("" if r.es_cierre else f" · al {D.fecha_larga(r.corte)}")
+                  + (" · liquidación" if getattr(r, "documento", "") == "liquidación" else ""), "value": r.corte}
         for r in informes.itertuples()
     ]
     cierre = next((o["value"] for o in opciones_anio if D.es_cierre(o["value"])), opciones_anio[0]["value"])
@@ -238,7 +239,8 @@ def ficha(d: D.Datos, corte: str, programa: str, codigo: str | None, t: dict):
             html.Div([html.Span(f"{nivel} {codigo}", className="etiqueta"), html.H2(fila["nombre_corto"])]),
             html.A("Ver documento original ↗", href=fila["fuente_url"], target="_blank", className="boton-enlace"),
         ]),
-        html.P(f"Hoja «{fila['hoja']}», fila {int(fila['fila_excel'])} del Excel.", className="nota"),
+        html.P(f"{D.nombre_documento(fila.get('documento'))}: hoja «{fila['hoja']}», fila "
+               f"{int(fila['fila_excel'])} del Excel.", className="nota"),
         html.Div(className="tarjetas tarjetas-ficha", children=[
             tarjeta("Presupuesto inicial", D.dinero(fila["presupuesto_inicial"])),
             tarjeta("Cambios en el año", D.dinero(cambio), "recortes, modificaciones y extraordinarios"),

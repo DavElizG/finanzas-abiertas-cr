@@ -6,6 +6,17 @@ Este documento define cada paso del procesamiento para que cualquiera pueda repr
 
 Informes de ejecución presupuestaria en Excel publicados por el Programa de Gestión Financiera de la UNA en `documentos.una.ac.cr` (comunidad 375, una colección por año). Cada archivo se descarga por la API REST de DSpace y se verifica con el MD5 que publica el servidor.
 
+### Liquidación presupuestaria
+
+La liquidación es el cierre oficial del año y trae las mismas tablas por programa al 31 de diciembre, así que se lee con el mismo parser. Reglas para combinarla:
+
+1. **El informe de ejecución de diciembre manda.** Si existe, sus cifras son las que se usan.
+2. **La liquidación llena los huecos.** Si un año no tiene informe de diciembre en Excel (2019), sus filas entran a `ejecucion.csv` con `documento = liquidación`, y de ellas también se calculan señales, validaciones y anomalías.
+3. **Donde hay ambos, se comparan** cuenta por cuenta (regla `liquidacion_vs_ejecucion`).
+4. Todas las filas de la liquidación quedan además en `liquidacion.csv`.
+
+Algunas liquidaciones (2016 y 2017) traen dos hojas por programa: la de «conformación», con el gasto en 0, y la de «ejecución». Se elige la hoja que trae gasto y, si ambas lo traen, la que tiene más cuentas.
+
 ## 2. Lectura de los informes
 
 Cada libro trae una hoja por programa: **integrado** (toda la universidad), **académico**, **administrativo** y **vida universitaria**.
@@ -44,6 +55,7 @@ Comparan dos cifras que **el propio documento** dice que deberían coincidir. La
 | `jerarquia` | las subcuentas suman a la cuenta padre (presupuesto inicial, total y gastado) |
 | `total_documento` | las partidas suman a la fila «TOTAL EGRESOS» |
 | `suma_programas` | académico + administrativo + vida universitaria = integrado, cuenta por cuenta |
+| `liquidacion_vs_ejecucion` | la liquidación y el informe de diciembre del mismo año coinciden en presupuesto inicial, presupuesto total y gastado, cuenta por cuenta; también se reporta una cuenta que aparece en un solo documento |
 | `error_celda` | celda con un error de Excel (`#REF!`, `#DIV/0!`…) |
 | `metadatos` | fecha de corte, unidad o nombre del archivo inconsistentes |
 
@@ -85,4 +97,5 @@ Son ejemplos de lo que el sistema detecta en los documentos. Todos son preguntas
 - **Diciembre 2024.** El ítem dice «diciembre 2024», pero los archivos se llaman «dic 2025»; el contenido corresponde a 2024.
 - **Junio 2019.** Las hojas de académico y vida universitaria traen el título «AL 31 DE MARZO DE 2019».
 - **Marzo 2018.** La hoja académica tiene vacía la columna de presupuesto inicial, y la consolidada no trae la columna de modificaciones aunque el total sí las incluye.
+- **Diciembre 2021, liquidación frente a informe.** En el programa académico, ₡306 M que el informe de diciembre registraba en «Recargo de funciones» aparecen en la liquidación como «Tiempo extraordinario». El total no cambia; cambia la cuenta. La comparación de los dos documentos encontró 23 diferencias en cuatro años (2016, 2020, 2021 y 2022).
 - **Junio 2021.** En los programas, las columnas mensuales de girado tienen saldos acumulados de enero a marzo y vienen vacías de abril a junio.

@@ -36,7 +36,7 @@ Inventario verificado contra la API en noviembre de 2026:
 | Serie (`--serie`) | Archivos | PDF | Excel | Estado |
 |---|---|---|---|---|
 | `ejecucion` | — | 2011–2026 | 2016–2025 | **Procesada** (23 informes en Excel) |
-| `liquidacion` | 23 | 2011–2025 | 2016–2023 | Solo descarga |
+| `liquidacion` | 23 | 2011–2025 | 2016–2017, 2019–2023 | **Procesada** (7 en Excel) |
 | `extraordinarios` | 52 | 2011–2026 | 2017–2025 | Solo descarga |
 | `presupuesto_ordinario` | 41 | 2011–2026 | 2016–2023 | Solo descarga |
 | `proyecto_presupuesto` | 24 | 2014–2026 | 2016–2020 | Solo descarga |
@@ -46,7 +46,7 @@ Inventario verificado contra la API en noviembre de 2026:
 | `activos_inmuebles` | 9 | 2018–2019 | 2018–2023 (ODS 2024) | Solo descarga |
 | `alquileres` | 9 | — | 2016–2022 | Solo descarga |
 
-En la ejecución faltan algunos cierres en Excel: no hay informe de diciembre para **2018 ni 2019**, el de 2025 todavía no se ha publicado y antes de 2016 solo hay PDF.
+La **liquidación presupuestaria** es el cierre oficial del año y trae las mismas tablas por programa al 31 de diciembre. Se usa para los años que no tienen informe de ejecución de diciembre en Excel (**2019**). Donde existen ambos documentos, se comparan cuenta por cuenta. **2018** sigue sin cierre en Excel: tanto su informe de diciembre como su liquidación solo están en PDF. El cierre de 2025 todavía no se ha publicado en Excel.
 
 ## Instalación y uso
 
@@ -59,7 +59,8 @@ pip install -e ".[dev]"
 pytest                                    # no necesita red
 
 finanzas listar    --serie ejecucion --formatos xlsx
-finanzas descargar --serie ejecucion --formatos xlsx --desde 2016
+finanzas descargar --serie ejecucion   --formatos xlsx --desde 2016
+finanzas descargar --serie liquidacion --formatos xlsx   # opcional: cierres oficiales
 finanzas procesar
 finanzas dashboard                        # http://127.0.0.1:8050
 ```
@@ -68,7 +69,8 @@ Archivos que se generan en `data/processed/una/` (sí se versionan):
 
 | Archivo | Contenido |
 |---|---|
-| `ejecucion.csv` | Una fila por informe × programa × cuenta, con presupuesto inicial, variaciones, presupuesto total, girado mes a mes, compromisos, gastado y disponible, todo en colones |
+| `ejecucion.csv` | Una fila por informe × programa × cuenta, con presupuesto inicial, variaciones, presupuesto total, girado mes a mes, compromisos, gastado y disponible, todo en colones. La columna `documento` dice si la fila sale de un informe de ejecución o de la liquidación |
+| `liquidacion.csv` | Todas las filas de las liquidaciones, con el mismo formato |
 | `modificaciones.csv` | Cada modificación interna y cada presupuesto extraordinario, por cuenta |
 | `validacion.csv` | Inconsistencias internas del documento (o de la lectura) |
 | `senales.csv` | Señales para revisar en subpartidas |
@@ -91,7 +93,9 @@ La definición exacta de cada validación, señal y umbral está en [docs/metodo
 
 ## Hoja de ruta
 
-- [ ] Procesar las liquidaciones (Excel 2016–2023) y los presupuestos extraordinarios (Excel 2017–2025)
+- [x] Procesar las liquidaciones en Excel (2016–2023)
+- [ ] Procesar los presupuestos extraordinarios (Excel 2017–2025)
+- [ ] Leer el cierre de 2018 desde PDF
 - [ ] Extraer los PDF (liquidaciones anteriores, estados financieros, auditorías)
 - [ ] Comparar con UCR, UNED, UTN y TEC usando el clasificador por objeto del gasto
 - [ ] Contratación pública (SICOP): concentración de proveedores y contratación directa
