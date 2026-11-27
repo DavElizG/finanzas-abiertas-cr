@@ -1,0 +1,73 @@
+/* Tokens: paleta de referencia (claro / oscuro seleccionados, no invertidos) */
+:root {
+  color-scheme: light;
+  --plano: #f9f9f7;
+  --superficie: #fcfcfb;
+  --tinta: #0b0b0b;
+  --tinta2: #52514e;
+  --tenue: #898781;
+  --rejilla: #e1e0d9;
+  --borde: rgba(11, 11, 11, 0.10);
+  --acento: #2a78d6;
+  --aviso-fondo: #fff6e0;
+  --aviso-borde: #fab219;
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --plano: #0d0d0d;
+  --superficie: #1a1a19;
+  --tinta: #f0efec;
+  --tinta2: #c3c2b7;
+  --tenue: #898781;
+  --rejilla: #2c2c2a;
+  --borde: rgba(255, 255, 255, 0.10);
+  --acento: #3987e5;
+  --aviso-fondo: #2a2414;
+  --aviso-borde: #fab219;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--plano);
+  color: var(--tinta);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  line-height: 1.45;
+}
+a { color: var(--acento); }
+.pagina { max-width: 1240px; margin: 0 auto; padding: 24px 16px 48px; }
+
+.cabecera { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+h1 { font-size: 28px; margin: 0 0 4px; letter-spacing: -0.01em; }
+h2 { font-size: 17px; margin: 0 0 2px; }
+.sub { color: var(--tinta2); margin: 0 0 12px; font-size: 14px; }
+.tema label { margin-left: 12px; color: var(--tinta2); font-size: 13px; }
+.tema input { margin-right: 4px; }
+
+.aviso {
+  background: var(--aviso-fondo); border-left: 4px solid var(--aviso-borde);
+  padding: 10px 14px; border-radius: 6px; margin: 12px 0 16px; font-size: 14px;
+}
+.aviso::before { content: "⚠ "; }
+
+.filtros { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
+.filtros label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--tinta2); min-width: 260px; flex: 1 1 260px; max-width: 380px; }
+
+.tarjetas { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.tarjeta { background: var(--superficie); border: 1px solid var(--borde); border-radius: 10px; padding: 14px 16px; }
+.tarjeta-titulo { font-size: 13px; color: var(--tinta2); }
+.tarjeta-valor { font-size: 26px; font-weight: 650; margin: 2px 0; }
+.tarjeta-nota { font-size: 12px; color: var(--tenue); }
+
+.rejilla { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 520px), 1fr)); gap: 16px; }
+.panel { background: var(--superficie); border: 1px solid var(--borde); border-radius: 10px; padding: 16px; margin-bottom: 16px; min-width: 0; }
+
+.pie { color: var(--tenue); font-size: 13px; margin-top: 24px; }
+
+/* Dropdowns de Dash en modo oscuro */
+:root[data-theme="dark"] .Select-control,
+:root[data-theme="dark"] .Select-menu-outer,
+:root[data-theme="dark"] .dash-dropdown { background: var(--superficie) !important; color: var(--tinta) !important; border-color: var(--rejilla) !important; }
+:root[data-theme="dark"] .Select-value-label,
+:root[data-theme="dark"] .Select-option { color: var(--tinta) !important; background: var(--superficie) !important; }
+.dash-spreadsheet td .dash-cell-value a, .dash-spreadsheet td p { margin: 0; }

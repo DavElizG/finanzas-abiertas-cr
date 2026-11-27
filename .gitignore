@@ -221,3 +221,11 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# --- finanzas-abiertas-cr ---
+# Documentos originales descargados: no se versionan (se pueden volver a bajar con el manifiesto)
+data/raw/
+# Archivos temporales de Excel
+~$*.xlsx
+# El manifiesto de descargas sí se versiona (la regla MANIFEST de arriba lo atrapa en Windows)
+!data/manifest/

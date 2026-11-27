@@ -1,0 +1,17 @@
+cff-version: 1.2.0
+message: "Si usas este software o sus datos procesados, por favor cítalo así."
+title: "finanzas-abiertas-cr: datos financieros públicos de instituciones costarricenses"
+type: software
+authors:
+  - family-names: "Guadamuz Elizondo"
+    given-names: "Jose"
+repository-code: "https://github.com/DavElizG/finanzas-abiertas-cr"
+license: MIT
+version: 0.1.0
+date-released: 2026-11-27
+keywords:
+  - costa-rica
+  - datos-abiertos
+  - transparencia
+  - presupuesto-publico
+  - universidad-nacional

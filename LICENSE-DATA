@@ -1,0 +1,16 @@
+Datos procesados y documentación de finanzas-abiertas-cr
+
+Los archivos de data/processed/, data/manifest/ y docs/ se distribuyen bajo la
+licencia Creative Commons Atribución 4.0 Internacional (CC BY 4.0):
+https://creativecommons.org/licenses/by/4.0/deed.es
+
+Puedes copiarlos, redistribuirlos, adaptarlos y usarlos con cualquier fin,
+siempre que des crédito a este proyecto (ver CITATION.cff) y a la fuente
+original, indiques si hiciste cambios y enlaces esta licencia.
+
+Fuente original: los documentos son información pública de la Universidad
+Nacional (Costa Rica), publicada en https://documentos.una.ac.cr. Esta licencia
+no se aplica a esos documentos originales ni los relicencia. Cada registro
+procesado incluye la URL del documento del que proviene (columna fuente_url).
+
+Este proyecto es independiente y no tiene afiliación con la Universidad Nacional.
